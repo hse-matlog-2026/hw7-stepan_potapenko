@@ -5,7 +5,7 @@
 # File name: predicates/semantics.py
 
 """Semantic analysis of predicate-logic expressions."""
-
+from itertools import product
 from typing import AbstractSet, FrozenSet, Generic, Mapping, Tuple, TypeVar
 
 from logic_utils import frozen, frozendict
@@ -147,6 +147,13 @@ class Model(Generic[T]):
             assert function in self.function_interpretations and \
                    self.function_arities[function] == arity
         # Task 7.7
+        if is_constant(term.root):
+            return self.constant_interpretations[term.root]
+        if is_variable(term.root):
+            return assignment[term.root]
+        arg_values = tuple(self.evaluate_term(arg, assignment)
+                           for arg in term.arguments)
+        return self.function_interpretations[term.root][arg_values]
 
     def evaluate_formula(self, formula: Formula,
                          assignment: Mapping[str, T] = frozendict()) -> bool:
@@ -176,6 +183,40 @@ class Model(Generic[T]):
             assert relation in self.relation_interpretations and \
                    self.relation_arities[relation] in {-1, arity}
         # Task 7.8
+        root = formula.root
+        if is_equality(root):
+            left = self.evaluate_term(formula.arguments[0], assignment)
+            right = self.evaluate_term(formula.arguments[1], assignment)
+            return left == right
+        if is_relation(root):
+            arg_values = tuple(self.evaluate_term(arg, assignment)
+                               for arg in formula.arguments)
+            return arg_values in self.relation_interpretations[root]
+        if is_unary(root):
+            return not self.evaluate_formula(formula.first, assignment)
+        if is_binary(root):
+            left = self.evaluate_formula(formula.first, assignment)
+            right = self.evaluate_formula(formula.second, assignment)
+            if root == '&':
+                return left and right
+            if root == '|':
+                return left or right
+            if root == '->':
+                return (not left) or right
+        if is_quantifier(root):
+            var = formula.variable
+            stmt = formula.statement
+            if root == 'A':
+                return all(
+                    self.evaluate_formula(stmt, {**assignment, var: elem})
+                    for elem in self.universe
+                )
+            if root == 'E':
+                return any(
+                    self.evaluate_formula(stmt, {**assignment, var: elem})
+                    for elem in self.universe
+                )
+        return False
 
     def is_model_of(self, formulas: AbstractSet[Formula]) -> bool:
         """Checks if the current model is a model of the given formulas.
@@ -200,3 +241,14 @@ class Model(Generic[T]):
                 assert relation in self.relation_interpretations and \
                        self.relation_arities[relation] in {-1, arity}
         # Task 7.9
+        for formula in formulas:
+            free_vars = list(formula.free_variables())
+            if not free_vars:
+                if not self.evaluate_formula(formula):
+                    return False
+            else:
+                for values in product(self.universe, repeat=len(free_vars)):
+                    assignment = dict(zip(free_vars, values))
+                    if not self.evaluate_formula(formula, assignment):
+                        return False
+        return True

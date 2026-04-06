@@ -88,10 +88,12 @@ class InferenceRule:
             A set of all variable names used in the assumptions and in the
             conclusion of the current inference rule.
         """
-        variables = set(self.conclusion.variables())
+        # Task 4.1
+        vars_set = set()
         for assumption in self.assumptions:
-            variables.update(assumption.variables())
-        return variables
+            vars_set.update(assumption.variables())
+        vars_set.update(self.conclusion.variables())
+        return vars_set
 
     def specialize(self, specialization_map: SpecializationMap) -> \
             InferenceRule:
@@ -108,22 +110,11 @@ class InferenceRule:
         """        
         for variable in specialization_map:
             assert is_variable(variable)
-        def specialize_formula(formula: Formula) -> Formula:
-            if is_variable(formula.root):
-                if formula.root in specialization_map:
-                    return specialization_map[formula.root]
-                return formula
-            if is_constant(formula.root):
-                return formula
-            if is_unary(formula.root):
-                return Formula(formula.root, specialize_formula(formula.first))
-            return Formula(formula.root, specialize_formula(formula.first),
-                           specialize_formula(formula.second))
-
-        assumptions = [specialize_formula(assumption)
-                       for assumption in self.assumptions]
-        conclusion = specialize_formula(self.conclusion)
-        return InferenceRule(assumptions, conclusion)
+        # Task 4.4
+        new_assumptions = [f.substitute_variables(specialization_map)
+                           for f in self.assumptions]
+        new_conclusion = self.conclusion.substitute_variables(specialization_map)
+        return InferenceRule(new_assumptions, new_conclusion)
 
     @staticmethod
     def _merge_specialization_maps(
@@ -149,14 +140,16 @@ class InferenceRule:
         if specialization_map2 is not None:
             for variable in specialization_map2:
                 assert is_variable(variable)
+        # Task 4.5a
         if specialization_map1 is None or specialization_map2 is None:
             return None
         merged = dict(specialization_map1)
-        for variable in specialization_map2:
-            if variable in merged and merged[variable] != \
-                    specialization_map2[variable]:
-                return None
-            merged[variable] = specialization_map2[variable]
+        for var, formula in specialization_map2.items():
+            if var in merged:
+                if merged[var] != formula:
+                    return None
+            else:
+                merged[var] = formula
         return merged
         
     @staticmethod
@@ -173,25 +166,18 @@ class InferenceRule:
             The computed specialization map, or ``None`` if `specialization` is
             in fact not a specialization of `general`.
         """
+        # Task 4.5b
         if is_variable(general.root):
             return {general.root: specialization}
         if is_constant(general.root):
-            if general.root == specialization.root:
-                return {}
+            return {} if general.root == specialization.root else None
+        if general.root != specialization.root:
             return None
+        map1 = InferenceRule._formula_specialization_map(general.first, specialization.first)
         if is_unary(general.root):
-            if not is_unary(specialization.root):
-                return None
-            return InferenceRule._formula_specialization_map(general.first,
-                                                             specialization.first)
-        if not is_binary(specialization.root) or general.root != \
-                specialization.root:
-            return None
-        first_map = InferenceRule._formula_specialization_map(general.first,
-                                                              specialization.first)
-        second_map = InferenceRule._formula_specialization_map(general.second,
-                                                               specialization.second)
-        return InferenceRule._merge_specialization_maps(first_map, second_map)
+            return map1
+        map2 = InferenceRule._formula_specialization_map(general.second, specialization.second)
+        return InferenceRule._merge_specialization_maps(map1, map2)
 
     def specialization_map(self, specialization: InferenceRule) -> \
             Union[SpecializationMap, None]:
@@ -205,19 +191,16 @@ class InferenceRule:
             The computed specialization map, or ``None`` if `specialization` is
             in fact not a specialization of the current rule.
         """
+        # Task 4.5c
         if len(self.assumptions) != len(specialization.assumptions):
             return None
-        specialization_map = InferenceRule._formula_specialization_map(
-            self.conclusion, specialization.conclusion)
-        for assumption, specialization_assumption in \
-                zip(self.assumptions, specialization.assumptions):
-            assumption_map = InferenceRule._formula_specialization_map(
-                assumption, specialization_assumption)
-            specialization_map = InferenceRule._merge_specialization_maps(
-                specialization_map, assumption_map)
-            if specialization_map is None:
-                return None
-        return specialization_map
+        res_map = {}
+        for g_as, s_as in zip(self.assumptions, specialization.assumptions):
+            current_map = InferenceRule._formula_specialization_map(g_as, s_as)
+            res_map = InferenceRule._merge_specialization_maps(res_map, current_map)
+            if res_map is None: return None
+        conclusion_map = InferenceRule._formula_specialization_map(self.conclusion, specialization.conclusion)
+        return InferenceRule._merge_specialization_maps(res_map, conclusion_map)
 
     def is_specialization_of(self, general: InferenceRule) -> bool:
         """Checks if the current inference rule is a specialization of the given
@@ -370,11 +353,11 @@ class Proof:
             line is justified as an assumption.
         """
         assert line_number < len(self.lines)
+        # Task 4.6a
         line = self.lines[line_number]
         if line.is_assumption():
             return None
-        assumptions = [self.lines[assumption].formula
-                       for assumption in line.assumptions]
+        assumptions = [self.lines[i].formula for i in line.assumptions]
         return InferenceRule(assumptions, line.formula)
 
     def is_line_valid(self, line_number: int) -> bool:
@@ -400,17 +383,16 @@ class Proof:
                be previous lines.
         """
         assert line_number < len(self.lines)
+        # Task 4.6b
         line = self.lines[line_number]
         if line.is_assumption():
             return line.formula in self.statement.assumptions
         if line.rule not in self.rules:
             return False
-        for assumption in line.assumptions:
-            if assumption < 0 or assumption >= line_number:
-                return False
-        rule_for_line = self.rule_for_line(line_number)
-        assert rule_for_line is not None
-        return rule_for_line.is_specialization_of(line.rule)
+        if any(a >= line_number for a in line.assumptions):
+            return False
+        actual_rule = self.rule_for_line(line_number)
+        return actual_rule.is_specialization_of(line.rule)
         
     def is_valid(self) -> bool:
         """Checks if the current proof is a valid proof of its claimed statement
@@ -420,14 +402,13 @@ class Proof:
             ``True`` if the current proof is a valid proof of its claimed
             statement via its inference rules, ``False`` otherwise.
         """
-        if len(self.lines) == 0:
-            return False
-        if self.lines[-1].formula != self.statement.conclusion:
-            return False
-        for line_number in range(len(self.lines)):
-            if not self.is_line_valid(line_number):
+        # Task 4.6c
+        for i in range(len(self.lines)):
+            if not self.is_line_valid(i):
                 return False
-        return True
+        if not self.lines:
+            return False
+        return self.lines[-1].formula == self.statement.conclusion
 
 def prove_specialization(proof: Proof, specialization: InferenceRule) -> Proof:
     """Converts the given proof of an inference rule to a proof of the given
@@ -444,14 +425,15 @@ def prove_specialization(proof: Proof, specialization: InferenceRule) -> Proof:
     assert proof.is_valid()
     assert specialization.is_specialization_of(proof.statement)
     # Task 5.1
-    map1 = proof.statement.specialization_map(specialization)
-    lines = []
+    spec_map = proof.statement.specialization_map(specialization)
+    new_lines = []
     for line in proof.lines:
+        new_formula = line.formula.substitute_variables(spec_map)
         if line.is_assumption():
-            lines.append(Proof.Line(line.formula.substitute_variables(map1)))
+            new_lines.append(Proof.Line(new_formula))
         else:
-            lines.append(Proof.Line(line.formula.substitute_variables(map1), line.rule, line.assumptions))
-    return Proof(specialization, proof.rules, lines)
+            new_lines.append(Proof.Line(new_formula, line.rule, line.assumptions))
+    return Proof(specialization, proof.rules, new_lines)
 
 def _inline_proof_once(main_proof: Proof, line_number: int,
                        lemma_proof: Proof) -> Proof:
@@ -482,40 +464,40 @@ def _inline_proof_once(main_proof: Proof, line_number: int,
     assert main_proof.lines[line_number].rule == lemma_proof.statement
     assert lemma_proof.is_valid()
     # Task 5.2a
-    rule = main_proof.rule_for_line(line_number)
-    lemma = prove_specialization(lemma_proof, rule)
+    line_to_replace = main_proof.lines[line_number]
+    actual_rule = main_proof.rule_for_line(line_number)
+    specialized_lemma_proof = prove_specialization(lemma_proof, actual_rule)
     new_lines = list(main_proof.lines[:line_number])
-    map1 = {}
-    main_line = main_proof.lines[line_number]
-
-    for i, line in enumerate(lemma.lines):
-        if line.is_assumption():
-            j = lemma.statement.assumptions.index(line.formula)
-            map1[i] = main_line.assumptions[j]
+    offset = line_number
+    for lemma_line in specialized_lemma_proof.lines:
+        if lemma_line.is_assumption():
+            pass
+        if lemma_line.rule is not None:
+            new_assumptions = tuple(a + offset for a in lemma_line.assumptions)
+            new_lines.append(Proof.Line(lemma_line.formula, lemma_line.rule, new_assumptions))
         else:
-            nums = [map1[k] for k in line.assumptions]
-            new_lines.append(Proof.Line(line.formula, line.rule, nums))
-            map1[i] = len(new_lines) - 1
-
-    last = map1[len(lemma.lines) - 1]
-    add = len(new_lines) - line_number - 1
-
+            for i, assumption_formula in enumerate(specialized_lemma_proof.statement.assumptions):
+                if lemma_line.formula == assumption_formula:
+                    source_line_index = line_to_replace.assumptions[i]
+                    target_line = main_proof.lines[source_line_index]
+                    new_lines.append(target_line)
+                    break
+    shift = len(specialized_lemma_proof.lines) - 1
     for i in range(line_number + 1, len(main_proof.lines)):
-        line = main_proof.lines[i]
-        if line.is_assumption():
-            new_lines.append(line)
+        old_line = main_proof.lines[i]
+        if old_line.is_assumption():
+            new_lines.append(old_line)
         else:
-            nums = []
-            for k in line.assumptions:
-                if k < line_number:
-                    nums.append(k)
-                elif k == line_number:
-                    nums.append(last)
+            new_ass = []
+            for a in old_line.assumptions:
+                if a < line_number:
+                    new_ass.append(a)
+                elif a == line_number:
+                    new_ass.append(line_number + shift)
                 else:
-                    nums.append(k + add)
-            new_lines.append(Proof.Line(line.formula, line.rule, nums))
-
-    return Proof(main_proof.statement, main_proof.rules.union(lemma_proof.rules), new_lines)
+                    new_ass.append(a + shift)
+            new_lines.append(Proof.Line(old_line.formula, old_line.rule, new_ass))
+    return Proof(main_proof.statement, main_proof.rules | lemma_proof.rules, new_lines)
 
 def inline_proof(main_proof: Proof, lemma_proof: Proof) -> Proof:
     """Inlines the given proof of a "lemma" inference rule into the given proof
@@ -538,10 +520,16 @@ def inline_proof(main_proof: Proof, lemma_proof: Proof) -> Proof:
     assert main_proof.is_valid()
     assert lemma_proof.is_valid()
     # Task 5.2b
-    proof = main_proof
-    for i in range(len(proof.lines)):
-        line = proof.lines[i]
-        if not line.is_assumption() and line.rule == lemma_proof.statement:
-            proof = _inline_proof_once(proof, i, lemma_proof)
-            return inline_proof(proof, lemma_proof)
-    return Proof(proof.statement, proof.rules - {lemma_proof.statement}, proof.lines)
+    current_proof = main_proof
+    lemma_rule = lemma_proof.statement
+    i = 0
+    while i < len(current_proof.lines):
+        if current_proof.lines[i].rule == lemma_rule:
+            current_proof = _inline_proof_once(current_proof, i, lemma_proof)
+            i = 0
+            continue
+        i += 1
+    new_rules = set(current_proof.rules)
+    if lemma_rule in new_rules:
+        new_rules.remove(lemma_rule)
+    return Proof(current_proof.statement, new_rules, current_proof.lines)

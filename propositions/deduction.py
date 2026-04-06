@@ -35,16 +35,12 @@ def prove_corollary(antecedent_proof: Proof, consequent: Formula,
                          Formula('->', antecedent_proof.statement.conclusion,
                                  consequent)).is_specialization_of(conditional)
     # Task 5.3a
-    a = antecedent_proof.statement.conclusion
-    f = Formula('->', a, consequent)
-    lines = list(antecedent_proof.lines)
-    lines.append(Proof.Line(f, conditional, []))
-    lines.append(Proof.Line(consequent, MP, [len(lines) - 2, len(lines) - 1]))
-    return Proof(
-        InferenceRule(antecedent_proof.statement.assumptions, consequent),
-        antecedent_proof.rules.union({MP, conditional}),
-        lines
-    )
+    antecedent = antecedent_proof.statement.conclusion
+    new_lines = list(antecedent_proof.lines)
+    new_lines.append(Proof.Line(Formula('->', antecedent, consequent), conditional, []))
+    new_lines.append(Proof.Line(consequent, MP, [len(new_lines) - 2, len(new_lines) - 1]))
+    return Proof(InferenceRule(antecedent_proof.statement.assumptions, consequent),
+                 antecedent_proof.rules | {MP, conditional}, new_lines)
 
 def combine_proofs(antecedent1_proof: Proof, antecedent2_proof: Proof,
                    consequent: Formula, double_conditional: InferenceRule) -> \
@@ -80,28 +76,26 @@ def combine_proofs(antecedent1_proof: Proof, antecedent2_proof: Proof,
         Formula('->', antecedent2_proof.statement.conclusion, consequent))
         ).is_specialization_of(double_conditional)
     # Task 5.3b
-    a = antecedent1_proof.statement.conclusion
-    b = antecedent2_proof.statement.conclusion
-    f = Formula('->', a, Formula('->', b, consequent))
-    lines = list(antecedent1_proof.lines)
-    shift = len(lines)
-
+    a1 = antecedent1_proof.statement.conclusion
+    a2 = antecedent2_proof.statement.conclusion
+    new_lines = list(antecedent1_proof.lines)
+    shift = len(new_lines)
     for line in antecedent2_proof.lines:
         if line.is_assumption():
-            lines.append(line)
+            new_lines.append(line)
         else:
-            nums = [i + shift for i in line.assumptions]
-            lines.append(Proof.Line(line.formula, line.rule, nums))
-
-    lines.append(Proof.Line(f, double_conditional, []))
-    lines.append(Proof.Line(Formula('->', b, consequent), MP, [len(antecedent1_proof.lines) - 1, len(lines) - 1]))
-    lines.append(Proof.Line(consequent, MP, [shift + len(antecedent2_proof.lines) - 1, len(lines) - 1]))
-
-    return Proof(
-        InferenceRule(antecedent1_proof.statement.assumptions, consequent),
-        antecedent1_proof.rules.union({MP, double_conditional}),
-        lines
-    )
+            new_assumptions = tuple(a + shift for a in line.assumptions)
+            new_lines.append(Proof.Line(line.formula, line.rule, new_assumptions))
+    idx_a1 = shift - 1
+    idx_a2 = len(new_lines) - 1
+    axiom_formula = Formula('->', a1, Formula('->', a2, consequent))
+    new_lines.append(Proof.Line(axiom_formula, double_conditional, []))
+    idx_axiom = len(new_lines) - 1
+    new_lines.append(Proof.Line(Formula('->', a2, consequent), MP, [idx_a1, idx_axiom]))
+    idx_intermediate = len(new_lines) - 1
+    new_lines.append(Proof.Line(consequent, MP, [idx_a2, idx_intermediate]))
+    return Proof(InferenceRule(antecedent1_proof.statement.assumptions, consequent),
+                 antecedent1_proof.rules | {MP, double_conditional}, new_lines)
 
 def remove_assumption(proof: Proof) -> Proof:
     """Converts the given proof of some `conclusion` formula, the last
@@ -128,42 +122,45 @@ def remove_assumption(proof: Proof) -> Proof:
     for rule in proof.rules:
         assert rule == MP or len(rule.assumptions) == 0
     # Task 5.4
-    a = proof.statement.assumptions[-1]
-    new_assumptions = proof.statement.assumptions[:-1]
+    gamma = proof.statement.assumptions[:-1]
+    psi = proof.statement.assumptions[-1]
     new_lines = []
-    map1 = {}
 
     for i, line in enumerate(proof.lines):
-        f = line.formula
-
-        if f == a:
-            new_lines.append(Proof.Line(Formula('->', a, a), I0, []))
-            map1[i] = len(new_lines) - 1
-        elif line.is_assumption() or line.rule != MP:
-            new_lines.append(line)
-            new_lines.append(Proof.Line(Formula('->', f, Formula('->', a, f)), I1, []))
-            new_lines.append(Proof.Line(Formula('->', a, f), MP, [len(new_lines) - 2, len(new_lines) - 1]))
-            map1[i] = len(new_lines) - 1
+        phi_i = line.formula
+        if phi_i == psi and line.is_assumption():
+            new_lines.append(Proof.Line(Formula('->', psi, psi), I0, []))
+        elif line.is_assumption() or (line.rule and len(line.rule.assumptions) == 0):
+            if line.is_assumption():
+                new_lines.append(Proof.Line(phi_i))
+            else:
+                new_lines.append(Proof.Line(phi_i, line.rule, []))
+            new_lines.append(Proof.Line(Formula('->', phi_i, Formula('->', psi, phi_i)), I1, []))
+            new_lines.append(Proof.Line(Formula('->', psi, phi_i), MP, [len(new_lines) - 2, len(new_lines) - 1]))
         else:
-            j = line.assumptions[0]
-            k = line.assumptions[1]
-            fj = proof.lines[j].formula
-            df = Formula(
-                '->',
-                Formula('->', a, Formula('->', fj, f)),
-                Formula('->', Formula('->', a, fj), Formula('->', a, f))
-            )
-            new_lines.append(Proof.Line(df, D, []))
-            new_lines.append(
-                Proof.Line(Formula('->', Formula('->', a, fj), Formula('->', a, f)), MP, [map1[k], len(new_lines) - 1]))
-            new_lines.append(Proof.Line(Formula('->', a, f), MP, [map1[j], len(new_lines) - 1]))
-            map1[i] = len(new_lines) - 1
-
-    return Proof(
-        InferenceRule(new_assumptions, Formula('->', a, proof.statement.conclusion)),
-        proof.rules.union({MP, I0, I1, D}),
-        new_lines
-    )
+            pass
+    mapping = {}
+    new_lines = []
+    for i, line in enumerate(proof.lines):
+        phi_i = line.formula
+        if phi_i == psi and line.is_assumption():
+            new_lines.append(Proof.Line(Formula('->', psi, psi), I0, []))
+        elif line.is_assumption() or (line.rule and len(line.rule.assumptions) == 0):
+            new_lines.append(line)
+            new_lines.append(Proof.Line(Formula('->', phi_i, Formula('->', psi, phi_i)), I1, []))
+            new_lines.append(Proof.Line(Formula('->', psi, phi_i), MP, [len(new_lines) - 2, len(new_lines) - 1]))
+        else:
+            j, k = line.assumptions
+            phi_j = proof.lines[j].formula
+            new_lines.append(Proof.Line(Formula('->', Formula('->', psi, Formula('->', phi_j, phi_i)),
+                                                Formula('->', Formula('->', psi, phi_j), Formula('->', psi, phi_i))), D,
+                                        []))
+            new_lines.append(Proof.Line(Formula('->', Formula('->', psi, phi_j), Formula('->', psi, phi_i)), MP,
+                                        [mapping[k], len(new_lines) - 1]))
+            new_lines.append(Proof.Line(Formula('->', psi, phi_i), MP, [mapping[j], len(new_lines) - 1]))
+        mapping[i] = len(new_lines) - 1
+    return Proof(InferenceRule(gamma, Formula('->', psi, proof.statement.conclusion)),
+                 proof.rules | {MP, I0, I1, D}, new_lines)
 
 def prove_from_opposites(proof_of_affirmation: Proof,
                          proof_of_negation: Proof, conclusion: Formula) -> \
@@ -220,20 +217,19 @@ def prove_by_way_of_contradiction(proof: Proof) -> Proof:
     for rule in proof.rules:
         assert rule == MP or len(rule.assumptions) == 0
     # Task 5.7
-    a = proof.statement.assumptions[-1]
-    f = a.first
-    proof1 = remove_assumption(proof)
-    lines = list(proof1.lines)
-
-    lines.append(
-        Proof.Line(Formula('->', Formula('->', a, Formula.parse('~(p->p)')), Formula('->', Formula.parse('(p->p)'), f)),
-                   N, []))
-    lines.append(Proof.Line(Formula('->', Formula.parse('(p->p)'), f), MP, [len(lines) - 2, len(lines) - 1]))
-    lines.append(Proof.Line(Formula.parse('(p->p)'), I0, []))
-    lines.append(Proof.Line(f, MP, [len(lines) - 1, len(lines) - 2]))
-
-    return Proof(
-        InferenceRule(proof.statement.assumptions[:-1], f),
-        proof.rules.union({MP, I0, I1, D, N}),
-        lines
-    )
+    proof_with_removed = remove_assumption(proof)
+    phi = proof.statement.assumptions[-1].first
+    new_lines = list(proof_with_removed.lines)
+    idx_removed_phi = len(new_lines) - 1
+    f_p_p = Formula.parse('(p->p)')
+    n_specialization = Formula('->', Formula('->', Formula('~', phi), Formula('~', f_p_p)),
+                               Formula('->', f_p_p, phi))
+    new_lines.append(Proof.Line(n_specialization, N, []))
+    idx_n_axiom = len(new_lines) - 1
+    new_lines.append(Proof.Line(Formula('->', f_p_p, phi), MP, [idx_removed_phi, idx_n_axiom]))
+    idx_cond_phi = len(new_lines) - 1
+    new_lines.append(Proof.Line(f_p_p, I0, []))
+    idx_p_p = len(new_lines) - 1
+    new_lines.append(Proof.Line(phi, MP, [idx_p_p, idx_cond_phi]))
+    return Proof(InferenceRule(proof_with_removed.statement.assumptions, phi),
+                 proof_with_removed.rules | {MP, I0, I1, D, N}, new_lines)

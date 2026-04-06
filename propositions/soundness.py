@@ -29,13 +29,13 @@ def rule_nonsoundness_from_specialization_nonsoundness(
     """
     assert specialization.is_specialization_of(general)
     assert not evaluate_inference(specialization, model)
-    specialization_map = general.specialization_map(specialization)
-    assert specialization_map is not None
-    counterexample_model = {}
-    for variable in general.variables():
-        counterexample_model[variable] = evaluate(specialization_map[variable],
-                                                  model)
-    return counterexample_model
+    # Task 4.9
+    spec_map = general.specialization_map(specialization)
+    new_model = {}
+    for var in general.variables():
+        formula_to_eval = spec_map[var]
+        new_model[var] = evaluate(formula_to_eval, model)
+    return new_model
 
 def nonsound_rule_of_nonsound_proof(proof: Proof, model: Model) -> \
         Tuple[InferenceRule, Model]:
@@ -54,14 +54,15 @@ def nonsound_rule_of_nonsound_proof(proof: Proof, model: Model) -> \
     """
     assert proof.is_valid()
     assert not evaluate_inference(proof.statement, model)
-    for line_number, line in enumerate(proof.lines):
-        if evaluate(line.formula, model):
-            continue
-        assert not line.is_assumption()
-        specialization = proof.rule_for_line(line_number)
-        assert specialization is not None
-        counterexample_model = \
-            rule_nonsoundness_from_specialization_nonsoundness(
-                line.rule, specialization, model)
-        return line.rule, counterexample_model
-    assert False
+    # Task 4.10
+    for line in proof.lines:
+        is_true = evaluate(line.formula, model)
+        if line.is_assumption():
+            assert is_true
+        else:
+            if not is_true:
+                specialization = proof.rule_for_line(proof.lines.index(line))
+                general_rule = line.rule
+                bad_model = rule_nonsoundness_from_specialization_nonsoundness(
+                    general_rule, specialization, model)
+                return (general_rule, bad_model)
